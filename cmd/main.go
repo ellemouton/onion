@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"github.com/urfave/cli"
 	"log"
 	"onion"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -28,6 +31,17 @@ func main() {
 		{
 			Name:   "build",
 			Action: buildOnion,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:     "hops",
+					Usage:    "structure: hop1_alias,hop2_alias,...",
+					Required: true,
+				},
+				cli.StringFlag{
+					Name:  "payloads",
+					Usage: "structure: payload 1,payload 2,...",
+				},
+			},
 		},
 		{
 			Name:   "parse",
@@ -59,7 +73,52 @@ func nodeInfo(ctx *cli.Context) error {
 }
 
 func buildOnion(ctx *cli.Context) error {
-	fmt.Println("Provide the hops and the messages you want to deliver to each")
+	hopsStr := ctx.String("hops")
+	hops := strings.Split(hopsStr, ",")
+
+	pl := ctx.String("payloads")
+
+	var payloads []string
+	if pl != "" {
+		payloads = strings.Split(pl, ",")
+		if len(payloads) != len(hops) {
+			return errors.New(fmt.Sprintf("num payloads (%d) "+
+				"does not match num hops (%d)", len(payloads),
+				len(hops)))
+		}
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	hopsData := make([]*onion.HopData, len(hops))
+	for i, hop := range hops {
+		user, err := onion.GetUser(hop)
+		if err != nil {
+			return err
+		}
+
+		payload := ""
+		if len(payloads) == 0 {
+			fmt.Printf("Enter message for %s: ", user.Name)
+			payload, err = reader.ReadString('\n')
+			if err != nil {
+				return err
+			}
+		} else {
+			payload = payloads[i]
+		}
+
+		hopsData[i] = &onion.HopData{
+			PubKey:  user.PubKey,
+			Payload: []byte(payload),
+		}
+	}
+
+	leOnion, err := onion.BuildOnion(hopsData)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(string(leOnion))
 
 	return nil
 }
