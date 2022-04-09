@@ -19,7 +19,10 @@ const (
 	davePk    = "456ffe0a616b5f2dc4997ce2615d79b5f9cac126fe971ccd1372527edccf12fe"
 )
 
-var Users map[string]*User
+var (
+	Users     map[string]*User
+	UserIndex map[string]string
+)
 
 type User struct {
 	Name    string
@@ -38,10 +41,12 @@ func GetUser(username string) (*User, error) {
 
 func init() {
 	Users = make(map[string]*User)
+	UserIndex = make(map[string]string)
 
 	// Read alice pubkey.
 	ab, _ := hex.DecodeString(alicePk)
 	priv, pub := btcec.PrivKeyFromBytes(ab)
+	UserIndex[string(pub.SerializeCompressed())] = Alice
 	Users[Alice] = &User{
 		Name:    Alice,
 		privKey: priv,
@@ -50,6 +55,7 @@ func init() {
 
 	bb, _ := hex.DecodeString(bobPk)
 	priv, pub = btcec.PrivKeyFromBytes(bb)
+	UserIndex[string(pub.SerializeCompressed())] = Bob
 	Users[Bob] = &User{
 		Name:    Bob,
 		privKey: priv,
@@ -58,6 +64,7 @@ func init() {
 
 	cb, _ := hex.DecodeString(charliePk)
 	priv, pub = btcec.PrivKeyFromBytes(cb)
+	UserIndex[string(pub.SerializeCompressed())] = Charlie
 	Users[Charlie] = &User{
 		Name:    Charlie,
 		privKey: priv,
@@ -66,6 +73,7 @@ func init() {
 
 	db, _ := hex.DecodeString(davePk)
 	priv, pub = btcec.PrivKeyFromBytes(db)
+	UserIndex[string(pub.SerializeCompressed())] = Dave
 	Users[Dave] = &User{
 		Name:    Dave,
 		privKey: priv,

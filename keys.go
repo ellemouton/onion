@@ -3,7 +3,6 @@ package onion
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"github.com/aead/chacha20"
 	"github.com/btcsuite/btcd/btcec/v2"
 )
 
@@ -23,7 +22,7 @@ var (
 	padType = []byte{0x70, 0x61, 0x64}
 )
 
-type HopKeys struct {
+type Hop struct {
 	// E is _our_ ephemeral priv key for this node.
 	E *btcec.PrivateKey
 
@@ -40,12 +39,15 @@ type HopKeys struct {
 
 	// The following keys are all derived from the SS key above.
 	Rho [32]byte
-	Muy [32]byte
+	Mu  [32]byte
 	Um  [32]byte
 	Pad [32]byte
+
+	// Payload is the payload we want to send to this hop.
+	Payload []byte
 }
 
-func NewHopKeys(e *btcec.PrivateKey, p *btcec.PublicKey) *HopKeys {
+func NewHop(p *btcec.PublicKey, e *btcec.PrivateKey, payload []byte) *Hop {
 	ss := sharedSecret(e, p)
 
 	rho := genKey(ss, rhoType)
@@ -54,38 +56,21 @@ func NewHopKeys(e *btcec.PrivateKey, p *btcec.PublicKey) *HopKeys {
 	pad := genKey(ss, padType)
 	bf := blindingFactor(ss, p)
 
-	return &HopKeys{
-		E:   e,
-		P:   p,
-		BF:  bf,
-		SS:  ss,
-		Rho: rho,
-		Muy: um,
-		Um:  mu,
-		Pad: pad,
+	return &Hop{
+		E:       e,
+		P:       p,
+		BF:      bf,
+		SS:      ss,
+		Rho:     rho,
+		Mu:      um,
+		Um:      mu,
+		Pad:     pad,
+		Payload: payload,
 	}
 }
 
-// PSByteStream generates a pseudo-random byte stream by initialising Chacha20
-// with one of the shared secret keys (rho only for now) and a 96-bit zero
-// nonce. A zero byte stream of the required length is then encrypted to
-// produce the final stream.
-func (sk *HopKeys) PSByteStream(len int) ([]byte, error) {
-	// 96-bit zero nonce
-	nonce := []byte{
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	}
-
-	cipher, err := chacha20.NewCipher(nonce, sk.Rho[:])
-	if err != nil {
-		return nil, err
-	}
-
-	output := make([]byte, len)
-	cipher.XORKeyStream(output, output)
-
-	return output, nil
+func (h *Hop) TotalSize() int {
+	return 2 + len(h.Payload) + 32
 }
 
 // genKey generates a key using HMAC256 with the given key type and using a
@@ -128,4 +113,11 @@ func blindingFactor(ss [32]byte, p *btcec.PublicKey) [32]byte {
 	copy(key[:], hash.Sum(nil))
 
 	return key
+}
+
+func blindPriv(bf [32]byte, p *btcec.PrivateKey) *btcec.PrivateKey {
+	scalar := &btcec.ModNScalar{}
+	scalar.SetByteSlice(bf[:])
+
+	return btcec.PrivKeyFromScalar(p.Key.Mul(scalar))
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/urfave/cli"
 	"log"
 	"onion"
@@ -113,12 +114,20 @@ func buildOnion(ctx *cli.Context) error {
 		}
 	}
 
-	leOnion, err := onion.BuildOnion(hopsData)
+	//sessionKey, err := btcec.NewPrivateKey()
+	//if err != nil {
+	//	return err
+	//}
+
+	b, _ := hex.DecodeString("6088af09c88b007b953cc12e28e88f119465eb6b4279a3f1cfc613f1df3ec848")
+	priv, _ := btcec.PrivKeyFromBytes(b)
+
+	leOnion, err := onion.BuildOnion(priv, hopsData)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(string(leOnion))
+	fmt.Println("Onion: ", hex.EncodeToString(leOnion.Serialize()))
 
 	return nil
 }

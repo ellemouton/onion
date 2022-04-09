@@ -1,6 +1,14 @@
 package onion
 
-import "errors"
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"github.com/aead/chacha20"
+	"github.com/btcsuite/btcd/btcec/v2"
+)
 
 type Onion struct {
 	Version     [1]byte
@@ -32,8 +40,190 @@ func DeserializeOnion(b []byte) (*Onion, error) {
 	return onion, nil
 }
 
-func BuildOnion(hopsData []*HopData) (*Onion, error) {
+func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, error) {
+	//sessionKey, err := btcec.NewPrivateKey()
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	fmt.Printf("My session key is: %x\n",
+		sessionKey.PubKey().SerializeCompressed())
+
+	ephemeralKey := sessionKey
+	hops := make([]*Hop, len(hopsData))
+	for i, hop := range hopsData {
+		payload := &HopPayload{
+			Payload: hop.Payload,
+		}
+
+		if i != len(hopsData)-1 {
+			payload.FwdTo = hopsData[i+1].PubKey
+		}
+
+		hops[i] = NewHop(hop.PubKey, ephemeralKey, payload.Serialize())
+
+		fmt.Printf("Preparing %s hop: \n"+
+			" - payload: %s\n - ephemeral key: %x\n",
+			UserIndex[string(hop.PubKey.SerializeCompressed())],
+			string(payload.Payload),
+			ephemeralKey.PubKey().SerializeCompressed())
+
+		ephemeralKey = blindPriv(hops[i].BF, ephemeralKey)
+	}
+
+	filler := genFiller(hops)
+
+	packet := genPadding(sessionKey)
+
+	var nextHmac [32]byte
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop := hops[i]
+
+		hmac := nextHmac
+
+		payload := make([]byte, hop.TotalSize())
+
+		binary.BigEndian.PutUint16(
+			payload[:2], uint16(len(hop.Payload)),
+		)
+		copy(payload[2:2+len(hop.Payload)], hop.Payload)
+		copy(payload[2+len(hop.Payload):], hmac[:])
+
+		rightShift(packet[:], hop.TotalSize())
+		copy(packet[:hop.TotalSize()], payload)
+
+		stream := pSByteStream(hop.Rho[:], 1300)
+
+		xor(packet[:], packet[:], stream[:])
+
+		// If this is the "last" hop, then we'll override the tail of
+		// the hop data.
+		if i == len(hops)-1 {
+			copy(packet[len(packet)-len(filler):], filler)
+		}
+
+		nextHmac = calcMac(hop.Mu, packet)
+	}
+
+	var pubKey [33]byte
+	copy(pubKey[:], sessionKey.PubKey().SerializeCompressed())
+
+	var finalPacket [1300]byte
+	copy(finalPacket[:], packet)
+
 	return &Onion{
-		Version: [1]byte{0x00},
+		Version:     [1]byte{0x00},
+		PubKey:      pubKey,
+		HopPayloads: finalPacket,
+		HMAC:        nextHmac,
 	}, nil
+}
+
+// calcMac calculates HMAC-SHA-256 over the message using the passed secret key
+// as input to the HMAC.
+func calcMac(key [32]byte, msg []byte) [32]byte {
+	hmac := hmac.New(sha256.New, key[:])
+	hmac.Write(msg)
+	h := hmac.Sum(nil)
+
+	var mac [32]byte
+	copy(mac[:], h[:32])
+
+	return mac
+}
+
+// rightShift shifts the byte-slice by the given number of bytes to the right
+// and 0-fill the resulting gap.
+func rightShift(slice []byte, num int) {
+	for i := len(slice) - num - 1; i >= 0; i-- {
+		slice[num+i] = slice[i]
+	}
+
+	for i := 0; i < num; i++ {
+		slice[i] = 0
+	}
+}
+
+func genFiller(hops []*Hop) []byte {
+	numHops := len(hops)
+
+	// We have to generate a filler that matches all but the last hop (the
+	// last hop won't generate an HMAC)
+	fillerSize := 0
+	for i := 0; i < numHops-1; i++ {
+		fillerSize += hops[i].TotalSize()
+	}
+	filler := make([]byte, fillerSize)
+
+	for i := 0; i < numHops-1; i++ {
+		// Sum up how many frames were used by prior hops.
+		fillerStart := 1300
+		for _, h := range hops[:i] {
+			fillerStart -= h.TotalSize()
+		}
+
+		// The filler is the part dangling off of the end of the
+		// routingInfo, so offset it from there, and use the current
+		// hop's frame count as its size.
+		fillerEnd := 1300 + hops[i].TotalSize()
+
+		streamKey := genKey(hops[i].SS, rhoType)
+		streamBytes := pSByteStream(streamKey[:], 2600)
+
+		xor(filler, filler, streamBytes[fillerStart:fillerEnd])
+	}
+
+	return filler
+}
+
+func genPadding(sessionKey *btcec.PrivateKey) []byte {
+	var sessionKeyBytes [32]byte
+	copy(sessionKeyBytes[:], sessionKey.Serialize())
+
+	paddingKey := genKey(sessionKeyBytes, padType)
+
+	// Now that we have our target key, we'll use chacha20 to generate a
+	// series of random bytes directly into the passed mixHeader packet.
+	var nonce [8]byte
+	padCipher, err := chacha20.NewCipher(nonce[:], paddingKey[:])
+	if err != nil {
+		panic(err)
+	}
+
+	var res [1300]byte
+	padCipher.XORKeyStream(res[:], res[:])
+
+	return res[:]
+}
+
+// pSByteStream generates a pseudo-random byte stream by initialising Chacha20
+// with one of the shared secret keys and a 96-bit zero nonce. A zero byte
+// stream of the required length is then encrypted to produce the final stream.
+func pSByteStream(keyType []byte, len int) []byte {
+	// 96-bit zero nonce
+	nonce := []byte{
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+
+	cipher, err := chacha20.NewCipher(nonce, keyType)
+	if err != nil {
+		panic(err)
+	}
+
+	output := make([]byte, len)
+	cipher.XORKeyStream(output, output)
+
+	return output
+}
+
+func xor(dst, a, b []byte) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		dst[i] = a[i] ^ b[i]
+	}
+	return n
 }
