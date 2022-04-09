@@ -49,7 +49,8 @@ func main() {
 			Action: parseOnion,
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name: "payload",
+					Name:     "payload",
+					Required: true,
 				},
 			},
 		},
@@ -114,15 +115,12 @@ func buildOnion(ctx *cli.Context) error {
 		}
 	}
 
-	//sessionKey, err := btcec.NewPrivateKey()
-	//if err != nil {
-	//	return err
-	//}
+	sessionKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		return err
+	}
 
-	b, _ := hex.DecodeString("6088af09c88b007b953cc12e28e88f119465eb6b4279a3f1cfc613f1df3ec848")
-	priv, _ := btcec.PrivKeyFromBytes(b)
-
-	leOnion, err := onion.BuildOnion(priv, hopsData)
+	leOnion, err := onion.BuildOnion(sessionKey, hopsData)
 	if err != nil {
 		return err
 	}
@@ -134,6 +132,37 @@ func buildOnion(ctx *cli.Context) error {
 
 func parseOnion(ctx *cli.Context) error {
 	fmt.Println("parsing onion!")
+
+	payload, err := hex.DecodeString(ctx.String("payload"))
+	if err != nil {
+		return err
+	}
+
+	onionPacket, err := onion.DeserializeOnion(payload)
+	if err != nil {
+		return err
+	}
+
+	// Get user.
+	user, err := onion.GetUser(ctx.GlobalString("user"))
+	if err != nil {
+		return err
+	}
+
+	myPayload, nextOnion, err := onion.Peel(user, onionPacket)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("My payload: \"", string(myPayload.Payload), "\"")
+
+	if myPayload.FwdTo == nil {
+		fmt.Println("Final hop! Can chill now")
+		return nil
+	}
+
+	fmt.Println("Should forward onion onto: ", onion.UserIndex[string(myPayload.FwdTo.SerializeCompressed())])
+	fmt.Println("Onion: ", hex.EncodeToString(nextOnion.Serialize()))
 
 	return nil
 }

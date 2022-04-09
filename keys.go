@@ -54,7 +54,10 @@ func NewHop(p *btcec.PublicKey, e *btcec.PrivateKey, payload []byte) *Hop {
 	um := genKey(ss, umType)
 	mu := genKey(ss, muType)
 	pad := genKey(ss, padType)
-	bf := blindingFactor(ss, p)
+
+	// The blinding factor itself is computed as a function of the ephemeral
+	// public key and the 32-byte shared secret
+	bf := blindingFactor(ss, e.PubKey())
 
 	return &Hop{
 		E:       e,
@@ -62,8 +65,8 @@ func NewHop(p *btcec.PublicKey, e *btcec.PrivateKey, payload []byte) *Hop {
 		BF:      bf,
 		SS:      ss,
 		Rho:     rho,
-		Mu:      um,
-		Um:      mu,
+		Mu:      mu,
+		Um:      um,
 		Pad:     pad,
 		Payload: payload,
 	}
@@ -120,4 +123,18 @@ func blindPriv(bf [32]byte, p *btcec.PrivateKey) *btcec.PrivateKey {
 	scalar.SetByteSlice(bf[:])
 
 	return btcec.PrivKeyFromScalar(p.Key.Mul(scalar))
+}
+
+func blindPub(bf [32]byte, p *btcec.PublicKey) *btcec.PublicKey {
+	scalar := &btcec.ModNScalar{}
+	scalar.SetByteSlice(bf[:])
+
+	var pubJ btcec.JacobianPoint
+	p.AsJacobian(&pubJ)
+
+	var blindedPub btcec.JacobianPoint
+	btcec.ScalarMultNonConst(scalar, &pubJ, &blindedPub)
+
+	blindedPub.ToAffine()
+	return btcec.NewPublicKey(&blindedPub.X, &blindedPub.Y)
 }

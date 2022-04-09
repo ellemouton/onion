@@ -41,10 +41,7 @@ func DeserializeOnion(b []byte) (*Onion, error) {
 }
 
 func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, error) {
-	//sessionKey, err := btcec.NewPrivateKey()
-	//if err != nil {
-	//	return nil, err
-	//}
+	finalSessionKey := sessionKey.PubKey()
 
 	fmt.Printf("My session key is: %x\n",
 		sessionKey.PubKey().SerializeCompressed())
@@ -106,7 +103,7 @@ func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, erro
 	}
 
 	var pubKey [33]byte
-	copy(pubKey[:], sessionKey.PubKey().SerializeCompressed())
+	copy(pubKey[:], finalSessionKey.SerializeCompressed())
 
 	var finalPacket [1300]byte
 	copy(finalPacket[:], packet)
@@ -114,6 +111,72 @@ func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, erro
 	return &Onion{
 		Version:     [1]byte{0x00},
 		PubKey:      pubKey,
+		HopPayloads: finalPacket,
+		HMAC:        nextHmac,
+	}, nil
+}
+
+func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
+	if onion.Version[0] != 0 {
+		return nil, nil, fmt.Errorf("must use version 0")
+	}
+
+	peerPubKey, err := btcec.ParsePubKey(onion.PubKey[:])
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ss := sharedSecret(user.privKey, peerPubKey)
+	bf := blindingFactor(ss, peerPubKey)
+	mu := genKey(ss, muType)
+	rho := genKey(ss, rhoType)
+
+	var packet [1300]byte
+	copy(packet[:], onion.HopPayloads[:])
+
+	// Validate the HMAC.
+	calculatedHmac := calcMac(mu, packet[:])
+
+	if !hmac.Equal(onion.HMAC[:], calculatedHmac[:]) {
+		return nil, nil, fmt.Errorf("invalid HMAC")
+	}
+
+	// First we pad the packet with 1300 zero bytes.
+	var paddedPacket [2600]byte
+	copy(paddedPacket[:], packet[:])
+
+	// Now we go ahead and de-obfuscate the packet.
+	stream := pSByteStream(rho[:], 2600)
+	xor(paddedPacket[:], paddedPacket[:], stream)
+
+	// We should now be able to read our packet. (len + payload + hmac)
+	payloadLen := binary.BigEndian.Uint16(paddedPacket[:2])
+	if payloadLen > 65 { // 1300/20=65
+		return nil, nil, fmt.Errorf("payload len too large")
+	}
+
+	payload := make([]byte, payloadLen)
+	copy(payload[:], paddedPacket[2:2+payloadLen])
+
+	hopPayload, err := DeserializeHopPayload(payload)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cant deserilize payload: %v", err)
+	}
+
+	var nextHmac [32]byte
+	copy(nextHmac[:], paddedPacket[2+payloadLen:2+payloadLen+32])
+
+	var finalPacket [1300]byte
+	copy(finalPacket[:], paddedPacket[2+payloadLen+32:])
+
+	// Blind the given ephemeral pub key to get the next one.
+	nextPubKey := blindPub(bf, peerPubKey)
+	var nextPubKeyBytes [33]byte
+	copy(nextPubKeyBytes[:], nextPubKey.SerializeCompressed())
+
+	return hopPayload, &Onion{
+		Version:     onion.Version,
+		PubKey:      nextPubKeyBytes,
 		HopPayloads: finalPacket,
 		HMAC:        nextHmac,
 	}, nil
@@ -199,14 +262,14 @@ func genPadding(sessionKey *btcec.PrivateKey) []byte {
 // pSByteStream generates a pseudo-random byte stream by initialising Chacha20
 // with one of the shared secret keys and a 96-bit zero nonce. A zero byte
 // stream of the required length is then encrypted to produce the final stream.
-func pSByteStream(keyType []byte, len int) []byte {
+func pSByteStream(key []byte, len int) []byte {
 	// 96-bit zero nonce
 	nonce := []byte{
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	}
 
-	cipher, err := chacha20.NewCipher(nonce, keyType)
+	cipher, err := chacha20.NewCipher(nonce, key)
 	if err != nil {
 		panic(err)
 	}
