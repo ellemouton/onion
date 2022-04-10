@@ -10,8 +10,98 @@ import (
 // HopData couples the payload we want to send to the peer we want to send it
 // to.
 type HopData struct {
-	PubKey  *btcec.PublicKey
-	Payload []byte
+	PubKey *btcec.PublicKey
+
+	// TODO(elle): separate out all the below fields into their own
+	//  Payload struct so that the Decode function makes more sense.
+
+	// ClearData is the data from the sender for this hop.
+	ClearData []byte
+
+	// EncryptedData is the data from the recipient for this hop.
+	EncryptedData []byte
+
+	// EphemeralKey is included only for the entry point hop.
+	EphemeralKey *btcec.PublicKey
+}
+
+func (h *HopData) EncodePayload() []byte {
+	/*
+		- 2 byte len(ClearData)
+		- ClearData
+		- 2 byte len(Encrypted Data)
+		- Encrypted Data
+		- 0/1 byte:
+			if 0-> no ephemeral key
+			if 1 -> ephemeral key
+	*/
+
+	payloadLen := 2 + len(h.ClearData) + 2 + len(h.EncryptedData) + 1
+	if h.EphemeralKey != nil {
+		payloadLen += 33
+	}
+
+	payload := make([]byte, payloadLen)
+	offset := 0
+	binary.BigEndian.PutUint16(payload[:2], uint16(len(h.ClearData)))
+	offset += 2
+	copy(payload[offset:offset+len(h.ClearData)], h.ClearData)
+	offset += len(h.ClearData)
+	binary.BigEndian.PutUint16(payload[offset:offset+2], uint16(len(h.EncryptedData)))
+	offset += 2
+	copy(payload[offset:offset+len(h.EncryptedData)], h.EncryptedData)
+	offset += len(h.EncryptedData)
+	payload[offset] = 0
+	if h.EphemeralKey != nil {
+		payload[offset] = 1
+		offset += 1
+		copy(payload[offset:], h.EphemeralKey.SerializeCompressed())
+	}
+
+	return payload
+}
+
+func DecodeHopDataPayload(b []byte) (*HopData, error) {
+	/*
+		- 2 byte len(ClearData)
+		- ClearData
+		- 2 byte len(Encrypted Data)
+		- Encrypted Data
+		- 0/1 byte:
+			if 0-> no ephemeral key
+			if 1 -> ephemeral key
+	*/
+
+	offset := 0
+	clearDataLen := binary.BigEndian.Uint16(b[offset : offset+2])
+	offset += 2
+
+	clearData := make([]byte, clearDataLen)
+	copy(clearData[:], b[offset:offset+int(clearDataLen)])
+	offset += int(clearDataLen)
+
+	encryptedDataLen := binary.BigEndian.Uint16(b[offset : offset+2])
+	offset += 2
+
+	encryptedData := make([]byte, encryptedDataLen)
+	copy(encryptedData[:], b[offset:offset+int(encryptedDataLen)])
+	offset += int(encryptedDataLen)
+
+	data := &HopData{
+		ClearData:     clearData,
+		EncryptedData: encryptedData,
+	}
+
+	if b[offset] != 0 {
+		offset++
+		key, err := btcec.ParsePubKey(b[offset:])
+		if err != nil {
+			return nil, err
+		}
+		data.EphemeralKey = key
+	}
+
+	return data, nil
 }
 
 // HopPayload is the actual hop payload we will send to a hop in the onion.
@@ -87,8 +177,9 @@ type BlindedPath struct {
 }
 
 func (b *BlindedPath) String() string {
-	str := fmt.Sprintf("Entry Node: %x\n",
-		b.EntryNodeID.SerializeCompressed())
+	entryUser := UserIndex[string(b.EntryNodeID.SerializeCompressed())]
+	str := fmt.Sprintf("Entry Node: %x - %s\n",
+		b.EntryNodeID.SerializeCompressed(), entryUser)
 
 	str += "Blinded Node IDs:\n"
 	for _, b := range b.BlindedNodeIDs {

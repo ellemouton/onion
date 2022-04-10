@@ -15,6 +15,10 @@ type Onion struct {
 	PubKey      [33]byte
 	HopPayloads [1300]byte
 	HMAC        [32]byte
+
+	// EphemeralKey is the key that should be passed onto the next hop in
+	// addition to the onion packet.
+	EphemeralKey *btcec.PublicKey
 }
 
 func (o *Onion) Serialize() []byte {
@@ -50,7 +54,7 @@ func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, erro
 	hops := make([]*Hop, len(hopsData))
 	for i, hop := range hopsData {
 		payload := &HopPayload{
-			Payload: hop.Payload,
+			Payload: hop.EncodePayload(),
 		}
 
 		if i != len(hopsData)-1 {
@@ -204,7 +208,7 @@ func BuildBlindedPath(sessionKey *btcec.PrivateKey,
 
 		blindedNodeIds[i] = blindPub(bf, hopsData[i].PubKey)
 
-		data := make([]byte, len(hopsData[i].Payload))
+		data := make([]byte, len(hopsData[i].ClearData))
 		stream := pSByteStream(rho[:], len(data))
 		xor(data[:], data[:], stream)
 
@@ -213,7 +217,7 @@ func BuildBlindedPath(sessionKey *btcec.PrivateKey,
 
 	return &BlindedPath{
 		EntryNodeID:               entryNode,
-		BlindedNodeIDs:            blindedNodeIds,
+		BlindedNodeIDs:            blindedNodeIds[1:],
 		EncryptedData:             encryptedData,
 		FirstBlindingEphemeralKey: firstBlindingEphemeral,
 	}, nil
