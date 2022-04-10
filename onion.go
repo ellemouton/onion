@@ -52,12 +52,17 @@ func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, erro
 
 	ephemeralKey := sessionKey
 	hops := make([]*Hop, len(hopsData))
+	blindedRoute := false
 	for i, hop := range hopsData {
+		if hop.EncryptedData != nil {
+			blindedRoute = true
+		}
+
 		payload := &HopPayload{
 			Payload: hop.EncodePayload(),
 		}
 
-		if i != len(hopsData)-1 {
+		if i != len(hopsData)-1 && !blindedRoute {
 			payload.FwdTo = hopsData[i+1].PubKey
 		}
 

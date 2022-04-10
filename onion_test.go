@@ -3,6 +3,7 @@ package onion
 import (
 	"bytes"
 	"encoding/hex"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/stretchr/testify/require"
 	"testing"
 )
@@ -17,4 +18,60 @@ func TestSerializeDeserialiseOnion(t *testing.T) {
 
 	onion2 := o.Serialize()
 	require.True(t, bytes.Equal(onionBytes, onion2))
+}
+
+func TestBuildAndPeelOnion(t *testing.T) {
+	pk1, _ := btcec.NewPrivateKey()
+
+	tests := []struct {
+		name       string
+		sessionKey *btcec.PrivateKey
+		hopsData   []*HopData
+		hopUsers   []string
+	}{
+		{
+			name:       "normal onion A -> B -> C -> D",
+			sessionKey: pk1,
+			hopsData: []*HopData{
+				{
+					PubKey:    Users[Bob].PubKey,
+					ClearData: []byte("Hi Bob"),
+				},
+				{
+					PubKey:    Users[Charlie].PubKey,
+					ClearData: []byte("Hi Charlie"),
+				},
+				{
+					PubKey:    Users[Dave].PubKey,
+					ClearData: []byte("Hi Dave"),
+				},
+			},
+			hopUsers: []string{Bob, Charlie, Dave},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			onion, err := BuildOnion(test.sessionKey, test.hopsData)
+			require.NoError(t, err)
+
+			var payload *HopPayload
+			for i, u := range test.hopUsers {
+				user := Users[u]
+				payload, onion, err = Peel(user, onion)
+				require.NoError(t, err)
+
+				pl, err := DecodeHopDataPayload(payload.Payload)
+				require.NoError(t, err)
+
+				require.True(
+					t,
+					bytes.Equal(
+						test.hopsData[i].ClearData,
+						pl.ClearData,
+					),
+				)
+			}
+		})
+	}
 }
