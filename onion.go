@@ -182,6 +182,43 @@ func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
 	}, nil
 }
 
+func BuildBlindedPath(sessionKey *btcec.PrivateKey,
+	hopsData []*HopData) (*BlindedPath, error) {
+
+	if len(hopsData) < 2 {
+		return nil, fmt.Errorf("need at least 2 nodes for a blinded " +
+			"path")
+	}
+
+	firstBlindingEphemeral := sessionKey.PubKey()
+	entryNode := hopsData[0].PubKey
+
+	blindedNodeIds := make([]*btcec.PublicKey, len(hopsData))
+	encryptedData := make([][]byte, len(hopsData))
+
+	ephemeral := sessionKey
+	for i := 0; i < len(hopsData); i++ {
+		ss := sharedSecret(ephemeral, hopsData[i].PubKey)
+		bf := genKey(ss, []byte("blinded_node_id"))
+		rho := genKey(ss, rhoType)
+
+		blindedNodeIds[i] = blindPub(bf, hopsData[i].PubKey)
+
+		data := make([]byte, len(hopsData[i].Payload))
+		stream := pSByteStream(rho[:], len(data))
+		xor(data[:], data[:], stream)
+
+		encryptedData[i] = data
+	}
+
+	return &BlindedPath{
+		EntryNodeID:               entryNode,
+		BlindedNodeIDs:            blindedNodeIds,
+		EncryptedData:             encryptedData,
+		FirstBlindingEphemeralKey: firstBlindingEphemeral,
+	}, nil
+}
+
 // calcMac calculates HMAC-SHA-256 over the message using the passed secret key
 // as input to the HMAC.
 func calcMac(key [32]byte, msg []byte) [32]byte {

@@ -78,3 +78,130 @@ func DeserializeHopPayload(b []byte) (*HopPayload, error) {
 		Payload: payload,
 	}, nil
 }
+
+type BlindedPath struct {
+	EntryNodeID               *btcec.PublicKey
+	BlindedNodeIDs            []*btcec.PublicKey
+	EncryptedData             [][]byte
+	FirstBlindingEphemeralKey *btcec.PublicKey
+}
+
+func (b *BlindedPath) String() string {
+	str := fmt.Sprintf("Entry Node: %x\n",
+		b.EntryNodeID.SerializeCompressed())
+
+	str += "Blinded Node IDs:\n"
+	for _, b := range b.BlindedNodeIDs {
+		str += fmt.Sprintf(" - %x\n", b.SerializeCompressed())
+	}
+
+	str += "Encrypted Data:\n"
+	for _, b := range b.EncryptedData {
+		str += fmt.Sprintf(" - %x\n", b)
+	}
+
+	str += fmt.Sprintf("First Blinding Ephemeral Key: %x\n",
+		b.FirstBlindingEphemeralKey.SerializeCompressed())
+
+	str += fmt.Sprintf("Encoded: %x\n", b.Encode())
+
+	return str
+}
+
+func (b *BlindedPath) Encode() []byte {
+	/*
+		33 byte -> entry node pub key
+		2 byte (numBlind) -> num of blinded keys
+		33 * numBlind -> blinded keys
+		numBlind + 1{
+			2 byte len -> len of encrypted data
+			encrypted data
+		}
+		33 byte -> first ephemeral key
+	*/
+	totalLen := 33 + 2 + (33 * len(b.BlindedNodeIDs)) + 33
+	for _, data := range b.EncryptedData {
+		totalLen += 2 + len(data)
+	}
+
+	payload := make([]byte, totalLen)
+	copy(payload[:33], b.EntryNodeID.SerializeCompressed())
+	binary.BigEndian.PutUint16(
+		payload[33:35], uint16(len(b.BlindedNodeIDs)),
+	)
+	offset := 35
+	for _, b := range b.BlindedNodeIDs {
+		copy(
+			payload[offset:offset+33],
+			b.SerializeCompressed(),
+		)
+		offset += 33
+	}
+
+	for _, b := range b.EncryptedData {
+		binary.BigEndian.PutUint16(payload[offset:offset+2],
+			uint16(len(b)))
+		offset += 2
+		copy(payload[offset:offset+len(b)], b)
+		offset += len(b)
+	}
+
+	copy(payload[offset:], b.FirstBlindingEphemeralKey.SerializeCompressed())
+
+	return payload
+}
+
+func DecodeBlindedPath(b []byte) (*BlindedPath, error) {
+	/*
+		33 byte -> entry node pub key
+		2 byte (numBlind) -> num of blinded keys
+		33 * numBlind -> blinded keys
+		numBlind + 1{
+			2 byte len -> len of encrypted data
+			encrypted data
+		}
+		33 byte -> first ephemeral key
+	*/
+	entryNode, err := btcec.ParsePubKey(b[:33])
+	if err != nil {
+		return nil, err
+	}
+
+	numBlinded := binary.BigEndian.Uint16(b[33:35])
+	blindedPoints := make([]*btcec.PublicKey, numBlinded)
+
+	offset := 35
+	for i := 0; i < int(numBlinded); i++ {
+		point, err := btcec.ParsePubKey(b[offset : offset+33])
+		if err != nil {
+			return nil, err
+		}
+
+		blindedPoints[i] = point
+		offset += 33
+	}
+
+	encryptedData := make([][]byte, numBlinded+1)
+	for i := 0; i < int(numBlinded)+1; i++ {
+		l := binary.BigEndian.Uint16(b[offset : offset+2])
+		offset += 2
+
+		data := make([]byte, l)
+		copy(data[:], b[offset:offset+int(l)])
+		offset += int(l)
+
+		encryptedData[i] = data
+	}
+
+	point, err := btcec.ParsePubKey(b[offset:])
+	if err != nil {
+		return nil, err
+	}
+
+	return &BlindedPath{
+		EntryNodeID:               entryNode,
+		BlindedNodeIDs:            blindedPoints,
+		EncryptedData:             encryptedData,
+		FirstBlindingEphemeralKey: point,
+	}, nil
+}
