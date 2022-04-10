@@ -208,11 +208,21 @@ func BuildBlindedPath(sessionKey *btcec.PrivateKey,
 
 		blindedNodeIds[i] = blindPub(bf, hopsData[i].PubKey)
 
-		data := make([]byte, len(hopsData[i].ClearData))
-		stream := pSByteStream(rho[:], len(data))
-		xor(data[:], data[:], stream)
+		var fwdTo *btcec.PublicKey
+		if i != len(hopsData)-1 {
+			fwdTo = hopsData[i+1].PubKey
+		}
 
-		encryptedData[i] = data
+		payload := &HopPayload{
+			Payload: hopsData[i].ClearData,
+			FwdTo:   fwdTo,
+		}
+		payloadSer := payload.Serialize()
+
+		stream := pSByteStream(rho[:], len(payloadSer))
+		xor(payloadSer[:], payloadSer[:], stream)
+
+		encryptedData[i] = payloadSer
 	}
 
 	return &BlindedPath{
