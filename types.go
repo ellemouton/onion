@@ -114,6 +114,11 @@ type HopPayload struct {
 	// FwdTo is the pub key of the node to which the packet should be
 	// forwarded to.
 	FwdTo *btcec.PublicKey
+
+	// DecryptedDataFromRecipient is an extra field we use to carry around
+	// the decrypted message from the recipient. This is not included in the
+	// serialization of the HopPayload.
+	DecryptedDataFromRecipient []byte
 }
 
 // Serialize the HopPayload. Since this is just an example, let's use a very

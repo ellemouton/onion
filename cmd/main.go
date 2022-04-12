@@ -193,7 +193,9 @@ func buildOnion(ctx *cli.Context) error {
 		return err
 	}
 
-	fmt.Println("Onion: ", hex.EncodeToString(leOnion.Serialize()))
+	fmt.Printf("Onion: %s\n", hex.EncodeToString(leOnion.Serialize()))
+	fmt.Printf("Give this onion to: %s\n",
+		onion.UserIndex[string(hopsData[0].PubKey.SerializeCompressed())])
 
 	return nil
 }
@@ -295,14 +297,16 @@ func buildOnionWithBlindedPath(ctx *cli.Context) error {
 		return err
 	}
 
+	fmt.Println("-------------------------------------------------------")
 	fmt.Println("Onion: ", hex.EncodeToString(leOnion.Serialize()))
+	fmt.Printf("Give this onion to: %s\n",
+		onion.UserIndex[string(hopsData[0].PubKey.SerializeCompressed())])
+	fmt.Println("-------------------------------------------------------")
 
 	return nil
 }
 
 func parseOnion(ctx *cli.Context) error {
-	fmt.Println("parsing onion!")
-
 	payload, err := hex.DecodeString(ctx.String("payload"))
 	if err != nil {
 		return err
@@ -344,20 +348,25 @@ func parseOnion(ctx *cli.Context) error {
 		return err
 	}
 
-	fmt.Println("My payload: \"", string(hopData.ClearData), "\"")
+	fmt.Println("-------------------------------------------------------")
+	fmt.Println("Payload from Sender: \"", string(hopData.ClearData), "\"")
+	fmt.Println("Payload from Recipient: \"",
+		string(myPayload.DecryptedDataFromRecipient), "\"")
 
 	if myPayload.FwdTo == nil {
 		fmt.Println("Final hop! Can chill now")
 		return nil
 	}
 
+	fmt.Println("Onion: ", hex.EncodeToString(nextOnion.Serialize()))
 	fmt.Println("Should forward onion onto: ",
 		onion.UserIndex[string(myPayload.FwdTo.SerializeCompressed())])
-	fmt.Println("Onion: ", hex.EncodeToString(nextOnion.Serialize()))
 
 	if nextOnion.EphemeralKey != nil {
-		fmt.Printf("Next Ephemeral: %x\n", nextOnion.EphemeralKey.SerializeCompressed())
+		fmt.Printf("Next Ephemeral: %x\n",
+			nextOnion.EphemeralKey.SerializeCompressed())
 	}
+	fmt.Println("-------------------------------------------------------")
 
 	return nil
 }

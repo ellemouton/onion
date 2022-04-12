@@ -47,9 +47,6 @@ func DeserializeOnion(b []byte) (*Onion, error) {
 func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, error) {
 	finalSessionKey := sessionKey.PubKey()
 
-	fmt.Printf("My session key is: %x\n",
-		sessionKey.PubKey().SerializeCompressed())
-
 	ephemeralKey := sessionKey
 	hops := make([]*Hop, len(hopsData))
 	blindedRoute := false
@@ -67,12 +64,6 @@ func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, erro
 		}
 
 		hops[i] = NewHop(hop.PubKey, ephemeralKey, payload.Serialize())
-
-		//fmt.Printf("Preparing %s hop: \n"+
-		//	" - payload: %s\n - ephemeral key: %x\n",
-		//	UserIndex[string(hop.PubKey.SerializeCompressed())],
-		//	string(payload.Payload),
-		//	ephemeralKey.PubKey().SerializeCompressed())
 
 		ephemeralKey = blindPriv(hops[i].BF, ephemeralKey)
 	}
@@ -176,9 +167,6 @@ func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
 
 	// We should now be able to read our packet. (len + payload + hmac)
 	payloadLen := binary.BigEndian.Uint16(paddedPacket[:2])
-	//if payloadLen > 65 { // 1300/20=65
-	//	return nil, nil, fmt.Errorf("payload len too large")
-	//}
 
 	payload := make([]byte, payloadLen)
 	copy(payload[:], paddedPacket[2:2+payloadLen])
@@ -218,6 +206,7 @@ func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
 		}
 
 		hopPayload.FwdTo = loadFromRecipient.FwdTo
+		hopPayload.DecryptedDataFromRecipient = loadFromRecipient.Payload
 	}
 
 	var nextHmac [32]byte

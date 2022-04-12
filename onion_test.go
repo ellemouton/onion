@@ -80,9 +80,7 @@ func TestBuildAndPeelBlindedOnion(t *testing.T) {
 	// A -> B -> C -> B(D) -> B(E)
 
 	// First, Eve builds blinded path C -> D -> E
-	// eveSessionKey, _ := btcec.NewPrivateKey()
-	ekb, _ := hex.DecodeString("32cc9e8b0975d79981b675a6558731364ccc7fe7d30ed2167282a9fbf51c6b30")
-	eveSessionKey, _ := btcec.PrivKeyFromBytes(ekb)
+	eveSessionKey, _ := btcec.NewPrivateKey()
 
 	blindedHopData := []*HopData{
 		{
@@ -103,9 +101,7 @@ func TestBuildAndPeelBlindedOnion(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now, Alice builds the onion.
-	//aliceSessionKey, _ := btcec.NewPrivateKey()
-	akb, _ := hex.DecodeString("d9c31ebeefc559112496013b2579a2f6a67242c9c9bb1cf91056fc45953a3870")
-	aliceSessionKey, _ := btcec.PrivKeyFromBytes(akb)
+	aliceSessionKey, _ := btcec.NewPrivateKey()
 
 	hopsData := []*HopData{
 		{
