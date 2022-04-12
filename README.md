@@ -1,7 +1,11 @@
-# Onion
+# Onion + Route Blinding
 
-- Repo for playing around with onion wrapping and peeling.
-- Onion works as is stated in Lightning Bolt 4.
+CLI tool for constructing & peeling onions both with and without route blinding.
+
+- Repo for playing around with onion wrapping and peeling both 
+with and without route blinding.
+- Onion works as is stated in [Bolt 4](https://github.com/lightning/bolts/blob/master/04-onion-routing.md): 
+- Route Blinding proposal can be found [here](https://github.com/lightning/bolts/blob/route-blinding/proposals/route-blinding.md)
 - Tis very rough and not at all pretty.
 
 ## Example 1: Normal Onion (no blinded hops) 
