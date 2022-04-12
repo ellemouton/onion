@@ -75,6 +75,9 @@ func main() {
 					Name:     "payload",
 					Required: true,
 				},
+				cli.StringFlag{
+					Name: "ephemeral",
+				},
 			},
 		},
 	}
@@ -316,6 +319,21 @@ func parseOnion(ctx *cli.Context) error {
 		return err
 	}
 
+	ep := ctx.String("ephemeral")
+	if ep != "" {
+		epb, err := hex.DecodeString(ep)
+		if err != nil {
+			return err
+		}
+
+		nextEphemeral, err := btcec.ParsePubKey(epb)
+		if err != nil {
+			return err
+		}
+
+		onionPacket.EphemeralKey = nextEphemeral
+	}
+
 	myPayload, nextOnion, err := onion.Peel(user, onionPacket)
 	if err != nil {
 		return err
@@ -336,6 +354,10 @@ func parseOnion(ctx *cli.Context) error {
 	fmt.Println("Should forward onion onto: ",
 		onion.UserIndex[string(myPayload.FwdTo.SerializeCompressed())])
 	fmt.Println("Onion: ", hex.EncodeToString(nextOnion.Serialize()))
+
+	if nextOnion.EphemeralKey != nil {
+		fmt.Printf("Next Ephemeral: %x\n", nextOnion.EphemeralKey.SerializeCompressed())
+	}
 
 	return nil
 }

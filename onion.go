@@ -68,11 +68,11 @@ func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, erro
 
 		hops[i] = NewHop(hop.PubKey, ephemeralKey, payload.Serialize())
 
-		fmt.Printf("Preparing %s hop: \n"+
-			" - payload: %s\n - ephemeral key: %x\n",
-			UserIndex[string(hop.PubKey.SerializeCompressed())],
-			string(payload.Payload),
-			ephemeralKey.PubKey().SerializeCompressed())
+		//fmt.Printf("Preparing %s hop: \n"+
+		//	" - payload: %s\n - ephemeral key: %x\n",
+		//	UserIndex[string(hop.PubKey.SerializeCompressed())],
+		//	string(payload.Payload),
+		//	ephemeralKey.PubKey().SerializeCompressed())
 
 		ephemeralKey = blindPriv(hops[i].BF, ephemeralKey)
 	}
@@ -135,7 +135,24 @@ func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
 		return nil, nil, err
 	}
 
-	ss := sharedSecret(user.privKey, peerPubKey)
+	privKey := user.privKey
+
+	var rhoR [32]byte
+	var nextEphemeral *btcec.PublicKey
+	if onion.EphemeralKey != nil {
+		// Tweak our priv key with the blinding factor
+		ssR := sharedSecret(user.privKey, onion.EphemeralKey)
+		bfR := genKey(ssR, []byte("blinded_node_id"))
+		rhoR = genKey(ssR, rhoType)
+
+		privKey = blindPriv(bfR, user.privKey)
+
+		// SHA256(E(i) || ss(i)) * e(i)
+		bf := blindingFactor(ssR, onion.EphemeralKey)
+		nextEphemeral = blindPub(bf, onion.EphemeralKey)
+	}
+
+	ss := sharedSecret(privKey, peerPubKey)
 	bf := blindingFactor(ss, peerPubKey)
 	mu := genKey(ss, muType)
 	rho := genKey(ss, rhoType)
@@ -145,7 +162,6 @@ func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
 
 	// Validate the HMAC.
 	calculatedHmac := calcMac(mu, packet[:])
-
 	if !hmac.Equal(onion.HMAC[:], calculatedHmac[:]) {
 		return nil, nil, fmt.Errorf("invalid HMAC")
 	}
@@ -160,9 +176,9 @@ func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
 
 	// We should now be able to read our packet. (len + payload + hmac)
 	payloadLen := binary.BigEndian.Uint16(paddedPacket[:2])
-	if payloadLen > 65 { // 1300/20=65
-		return nil, nil, fmt.Errorf("payload len too large")
-	}
+	//if payloadLen > 65 { // 1300/20=65
+	//	return nil, nil, fmt.Errorf("payload len too large")
+	//}
 
 	payload := make([]byte, payloadLen)
 	copy(payload[:], paddedPacket[2:2+payloadLen])
@@ -170,6 +186,38 @@ func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
 	hopPayload, err := DeserializeHopPayload(payload)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cant deserilize payload: %v", err)
+	}
+
+	hopPayloadData, err := DecodeHopDataPayload(hopPayload.Payload)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if hopPayloadData.EphemeralKey != nil {
+		// Tweak our priv key with the blinding factor
+		ssR := sharedSecret(user.privKey, hopPayloadData.EphemeralKey)
+		bfR := genKey(ssR, []byte("blinded_node_id"))
+		rhoR = genKey(ssR, rhoType)
+
+		privKey = blindPriv(bfR, user.privKey)
+
+		// SHA256(E(i) || ss(i)) * e(i)
+		bf := blindingFactor(ssR, hopPayloadData.EphemeralKey)
+		nextEphemeral = blindPub(bf, hopPayloadData.EphemeralKey)
+	}
+
+	if len(hopPayloadData.EncryptedData) != 0 {
+		stream := pSByteStream(rhoR[:], len(hopPayloadData.EncryptedData))
+		decrypted := make([]byte, len(hopPayloadData.EncryptedData))
+
+		xor(decrypted[:], hopPayloadData.EncryptedData[:], stream)
+
+		loadFromRecipient, err := DeserializeHopPayload(decrypted)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		hopPayload.FwdTo = loadFromRecipient.FwdTo
 	}
 
 	var nextHmac [32]byte
@@ -184,10 +232,11 @@ func Peel(user *User, onion *Onion) (*HopPayload, *Onion, error) {
 	copy(nextPubKeyBytes[:], nextPubKey.SerializeCompressed())
 
 	return hopPayload, &Onion{
-		Version:     onion.Version,
-		PubKey:      nextPubKeyBytes,
-		HopPayloads: finalPacket,
-		HMAC:        nextHmac,
+		Version:      onion.Version,
+		PubKey:       nextPubKeyBytes,
+		HopPayloads:  finalPacket,
+		HMAC:         nextHmac,
+		EphemeralKey: nextEphemeral,
 	}, nil
 }
 
@@ -228,6 +277,8 @@ func BuildBlindedPath(sessionKey *btcec.PrivateKey,
 		xor(payloadSer[:], payloadSer[:], stream)
 
 		encryptedData[i] = payloadSer
+
+		ephemeral = blindPriv(blindingFactor(ss, ephemeral.PubKey()), ephemeral)
 	}
 
 	return &BlindedPath{

@@ -75,3 +75,77 @@ func TestBuildAndPeelOnion(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildAndPeelBlindedOnion(t *testing.T) {
+	// A -> B -> C -> B(D) -> B(E)
+
+	// First, Eve builds blinded path C -> D -> E
+	// eveSessionKey, _ := btcec.NewPrivateKey()
+	ekb, _ := hex.DecodeString("32cc9e8b0975d79981b675a6558731364ccc7fe7d30ed2167282a9fbf51c6b30")
+	eveSessionKey, _ := btcec.PrivKeyFromBytes(ekb)
+
+	blindedHopData := []*HopData{
+		{
+			PubKey:    Users[Charlie].PubKey,
+			ClearData: []byte("Hi Charlie, from Eve"),
+		},
+		{
+			PubKey:    Users[Dave].PubKey,
+			ClearData: []byte("Hi Dave, from Eve"),
+		},
+		{
+			PubKey:    Users[Eve].PubKey,
+			ClearData: []byte("Hi Me, from Me"),
+		},
+	}
+
+	bp, err := BuildBlindedPath(eveSessionKey, blindedHopData)
+	require.NoError(t, err)
+
+	// Now, Alice builds the onion.
+	//aliceSessionKey, _ := btcec.NewPrivateKey()
+	akb, _ := hex.DecodeString("d9c31ebeefc559112496013b2579a2f6a67242c9c9bb1cf91056fc45953a3870")
+	aliceSessionKey, _ := btcec.PrivKeyFromBytes(akb)
+
+	hopsData := []*HopData{
+		{
+			PubKey:    Users[Bob].PubKey,
+			ClearData: []byte("Hi Bob, from Alice"),
+		},
+		{
+			PubKey:        Users[Charlie].PubKey,
+			ClearData:     []byte("Hi Charlie, from Alice"),
+			EncryptedData: bp.EncryptedData[0],
+			EphemeralKey:  bp.FirstBlindingEphemeralKey,
+		},
+		{
+			PubKey:        bp.BlindedNodeIDs[0],
+			ClearData:     []byte("Hi B(D), from Alice"),
+			EncryptedData: bp.EncryptedData[1],
+		},
+		{
+			PubKey:        bp.BlindedNodeIDs[1],
+			ClearData:     []byte("Hi B(E), from Alice"),
+			EncryptedData: bp.EncryptedData[2],
+		},
+	}
+
+	onion, err := BuildOnion(aliceSessionKey, hopsData)
+	require.NoError(t, err)
+
+	// Give onion to Bob:
+	_, onion, err = Peel(Users[Bob], onion)
+	require.NoError(t, err)
+
+	// Give onion to Charlie:
+	_, onion, err = Peel(Users[Charlie], onion)
+	require.NoError(t, err)
+
+	// Give onion to Dave:
+	_, onion, err = Peel(Users[Dave], onion)
+	require.NoError(t, err)
+
+	// Give onion to Eve:
+	_, onion, err = Peel(Users[Eve], onion)
+	require.NoError(t, err)
+}
