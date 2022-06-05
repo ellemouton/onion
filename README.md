@@ -8,6 +8,9 @@ with and without route blinding.
 - Route Blinding proposal can be found [here](https://github.com/lightning/bolts/blob/route-blinding/proposals/route-blinding.md)
 - Tis very rough and not at all pretty.
 
+NOTE: This uses simple encoding for messages as this is just a POC. It does not use the correct BigSize and TLV 
+encoding.
+
 ## Example 1: Normal Onion (no blinded hops) 
 
 We assume the following node setup:
