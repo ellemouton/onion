@@ -116,8 +116,8 @@ type HopPayload struct {
 	FwdTo *btcec.PublicKey
 
 	// DecryptedDataFromRecipient is an extra field we use to carry around
-	// the decrypted message from the recipient. This is not included in the
-	// serialization of the HopPayload.
+	// the decrypted message from the recipient.
+	// NOTE: This is not included in the serialization of the HopPayload.
 	DecryptedDataFromRecipient []byte
 }
 

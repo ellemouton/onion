@@ -44,10 +44,11 @@ func DeserializeOnion(b []byte) (*Onion, error) {
 	return onion, nil
 }
 
-func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, error) {
-	finalSessionKey := sessionKey.PubKey()
+func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion,
+	error) {
 
-	ephemeralKey := sessionKey
+	sessPriv, _ := btcec.PrivKeyFromBytes(sessionKey.Serialize())
+	ephemeralKey := sessPriv
 	hops := make([]*Hop, len(hopsData))
 	blindedRoute := false
 	for i, hop := range hopsData {
@@ -103,7 +104,7 @@ func BuildOnion(sessionKey *btcec.PrivateKey, hopsData []*HopData) (*Onion, erro
 	}
 
 	var pubKey [33]byte
-	copy(pubKey[:], finalSessionKey.SerializeCompressed())
+	copy(pubKey[:], sessionKey.PubKey().SerializeCompressed())
 
 	var finalPacket [1300]byte
 	copy(finalPacket[:], packet)
